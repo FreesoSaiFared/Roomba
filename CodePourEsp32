@@ -1,0 +1,248 @@
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncTCP.h>
+#include <ArduinoJson.h>
+
+// ----------- À MODIFIER PAR L'UTILISATEUR -----------
+const char* ssid = "TON_WIFI";         // Ton nom de réseau WiFi
+const char* password = "TON_MDP_WIFI"; // Ton mot de passe WiFi
+
+// Pins utilisées pour connecter l'ESP32 au Roomba en série
+#define ROOMBA_RX 16   // RX2 (recevoir depuis Roomba, optionnel)
+#define ROOMBA_TX 17   // TX2 (envoyer vers Roomba)
+
+// ---- Variables pour stocker les états du Roomba ----
+volatile int batteryLevel = -1;
+volatile int batteryPercent = -1;
+volatile bool bumpLeft = false, bumpRight = false, cliffLeft = false, cliffRight = false;
+volatile bool brossesOn = false; // État des brosses
+
+// Bitmask pour moteurs (1: brosse centrale, 2: aspiration, 4: brosse latérale)
+#define MOTORS_ON 7   // Active toutes les brosses et l'aspirateur
+#define MOTORS_OFF 0  // Arrête tout
+
+// ----------- Initialisation du serveur Web --------
+AsyncWebServer server(80);
+AsyncWebSocket ws("/ws");
+
+// ----------- Fonction pour envoyer une commande de déplacement au Roomba -----------
+void sendDriveCommand(int speed, int radius) {
+  // Vitesse en mm/s (-500 à +500), rayon en mm (-2000 à +2000 ou 0 pour tout droit)
+  if (speed > 500) speed = 500;
+  if (speed < -500) speed = -500;
+  if (radius > 2000) radius = 2000;
+  if (radius < -2000) radius = -2000;
+  uint8_t cmd[5];
+  cmd[0] = 137; // Code "DRIVE"
+  cmd[1] = (speed >> 8) & 0xFF;
+  cmd[2] = speed & 0xFF;
+  cmd[3] = (radius >> 8) & 0xFF;
+  cmd[4] = radius & 0xFF;
+  Serial2.write(cmd, 5);
+}
+
+// ----------- Fonction pour activer/désactiver les brosses/aspiration -----------
+void toggleBrosses() {
+  if (brossesOn) {
+    Serial2.write(138); Serial2.write(MOTORS_OFF); // stop all
+  } else {
+    Serial2.write(138); Serial2.write(MOTORS_ON); // start all
+  }
+  brossesOn = !brossesOn;
+}
+
+// ----------- Récupère le niveau de batterie et la capacité -----------
+void updateBattery() {
+  Serial2.write(142); Serial2.write(21);  // Packet 21 : battery stats
+  delay(50);
+  if (Serial2.available() >= 10) {
+    byte data[10];
+    Serial2.readBytes(data, 10);
+    int charge = (data[6] << 8) | data[7];      // Charge actuelle (mAh)
+    int capacity = (data[8] << 8) | data[9];    // Capacité max (mAh)
+    if (capacity > 0) {
+      batteryLevel = charge;
+      batteryPercent = (charge * 100) / capacity; // Calcul du pourcentage
+    }
+  }
+}
+
+// ----------- Récupère les états des pare-chocs et capteurs de falaise -----------
+void updateSensors() {
+  // Bump (pare-choc)
+  Serial2.write(142); Serial2.write(7); delay(20);
+  if (Serial2.available()) {
+    byte data = Serial2.read();
+    bumpLeft = data & 0x02;
+    bumpRight = data & 0x01;
+  }
+  // Cliff (falaise gauche)
+  Serial2.write(142); Serial2.write(9); delay(20);
+  if (Serial2.available()) {
+    byte cliff = Serial2.read();
+    cliffLeft = cliff & 0x01;
+  }
+  // Cliff (falaise droite)
+  Serial2.write(142); Serial2.write(11); delay(20);
+  if (Serial2.available()) {
+    byte cliff = Serial2.read();
+    cliffRight = cliff & 0x01;
+  }
+}
+
+// ---------- Mise à jour régulière -----------
+unsigned long lastUpdate = 0;
+
+// ----------- Réception des commandes joystick via WebSocket -----------
+void onWebSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
+                      AwsEventType type, void *arg, uint8_t *data, size_t len) {
+  if (type == WS_EVT_DATA) {
+    AwsFrameInfo *info = (AwsFrameInfo*)arg;
+    if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
+      DynamicJsonDocument doc(128);
+      DeserializationError err = deserializeJson(doc, data, len);
+      if (!err) {
+        int x = doc["x"];
+        int y = doc["y"];
+        // Conversion XY joystick vers vitesse/angle Roomba
+        int speed = map(y, -100, 100, -300, 300);
+        int radius;
+        if (abs(x) < 10) {
+          radius = 0;
+        } else if (x > 0) {
+          radius = -1 * map(abs(x), 0, 100, 2000, 1);
+        } else {
+          radius = map(abs(x), 0, 100, 2000, 1);
+        }
+        sendDriveCommand(speed, radius);
+      }
+    }
+  }
+}
+
+// ----------- Initialisation de l'ESP32 et du Roomba -----------
+void setup() {
+  Serial.begin(115200); // Pour debug sur moniteur série
+  Serial2.begin(115200, SERIAL_8N1, ROOMBA_RX, ROOMBA_TX); // Port série pour Roomba
+
+  // Connexion au WiFi
+  Serial.println("\n[ESP32] Connexion au WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+  Serial.print("[ESP32] Connecté ! IP : ");
+  Serial.println(WiFi.localIP());
+
+  // Active le mode Open Interface du Roomba
+  Serial2.write(128); delay(100); // START
+  Serial2.write(132); delay(100); // FULL (plein contrôle)
+
+  // Websocket : réception commandes joystick
+  ws.onEvent(onWebSocketEvent);
+  server.addHandler(&ws);
+
+  // --------- Page web envoyée par l'ESP32 ---------
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send_P(200, "text/html", R"rawliteral(
+      <html><head>
+      <meta name="viewport" content="width=device-width,initial-scale=1"/>
+      <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.9.0/dist/nipplejs.min.js"></script>
+      <style>
+        #zone {width:240px;height:240px;margin:30px auto;background:#f4f4f4;border-radius:50%;box-shadow:0 0 10px #aaa;position:relative;}
+        body {text-align:center;font-family:Arial,sans-serif;}
+        h2 {margin-top:30px;}
+        #batt {margin-bottom: 15px; font-size: 1.2em; color:#007700;}
+        #status {margin-top:10px;font-size:1.1em;}
+        #brossesbtn {margin-bottom:15px;font-size:1.3em;padding:10px 24px;}
+      </style>
+      </head><body>
+      <h2>Roomba Joystick</h2>
+      <!-- Bouton pour les brosses (ON/OFF) -->
+      <button id="brossesbtn" onclick="toggleBrosses()">🧹 Brosses ON</button>
+      <div id="batt">Batterie : --%</div>
+      <div id="zone"></div>
+      <div id="status">État capteurs : --</div>
+      <script>
+        // ---- Fonction pour demander l'état à l'ESP32 toutes les 2 secondes ----
+        let brosses = false;
+        function toggleBrosses() {
+          fetch('/brosses', {method:'POST'})
+            .then(() => {
+              brosses = !brosses;
+              document.getElementById('brossesbtn').style.background = brosses ? '#aaffaa' : '';
+              document.getElementById('brossesbtn').textContent = brosses ? "⏹️ Stop Brosses" : "🧹 Brosses ON";
+            });
+        }
+        function refreshBattery() {
+          fetch('/status')
+            .then(res => res.json())
+            .then(stat => {
+              document.getElementById('batt').textContent = 'Batterie : ' + stat.percent + '%';
+              let status = '';
+              status += stat.bumpL ? 'Pare-choc G<br>' : '';
+              status += stat.bumpR ? 'Pare-choc D<br>' : '';
+              status += stat.cliffL ? 'Falaise G<br>' : '';
+              status += stat.cliffR ? 'Falaise D<br>' : '';
+              document.getElementById('status').innerHTML = status || 'RAS';
+              brosses = !!stat.brosses;
+              document.getElementById('brossesbtn').style.background = brosses ? '#aaffaa' : '';
+              document.getElementById('brossesbtn').textContent = brosses ? "⏹️ Stop Brosses" : "🧹 Brosses ON";
+            });
+        }
+        setInterval(refreshBattery, 2000);
+        window.onload = refreshBattery;
+
+        // ---- Joystick virtuel (nipplejs) ----
+        let ws = new WebSocket('ws://' + location.host + '/ws');
+        let joystick = nipplejs.create({
+          zone:document.getElementById('zone'),
+          mode:'static',
+          position:{left:'50%', top:'50%'},
+          color:'blue'
+        });
+        joystick.on('move', function(evt, data) {
+          let x = Math.round(data.vector.x*100);
+          let y = Math.round(data.vector.y*100);
+          ws.send(JSON.stringify({x:x, y:y}));
+        });
+        joystick.on('end', function(evt) {
+          ws.send(JSON.stringify({x:0, y:0}));
+        });
+      </script>
+      </body></html>
+    )rawliteral");
+  });
+
+  // ----------- Route pour le bouton BROSSSES -----------
+  server.on("/brosses", HTTP_POST, [](AsyncWebServerRequest *request){
+    toggleBrosses();
+    request->send(200, "text/plain", "OK");
+  });
+
+  // ----------- Route d'état (batterie + capteurs + brosses) -----------
+  server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request){
+    String json = "{\"batt\":" + String(batteryLevel) +
+                ",\"percent\":" + String(batteryPercent) +
+                ",\"bumpL\":" + String(bumpLeft ? "true":"false") +
+                ",\"bumpR\":" + String(bumpRight ? "true":"false") +
+                ",\"cliffL\":" + String(cliffLeft ? "true":"false") +
+                ",\"cliffR\":" + String(cliffRight ? "true":"false") +
+                ",\"brosses\":" + String(brossesOn ? "true":"false") +
+                "}";
+    request->send(200, "application/json", json);
+  });
+
+  server.begin();
+}
+
+// ----------- Boucle principale : actualisation régulière de l'état -----------
+void loop() {
+  if (millis() - lastUpdate > 1000) {
+    updateBattery();
+    updateSensors();
+    lastUpdate = millis();
+  }
+}
