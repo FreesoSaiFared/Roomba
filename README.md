@@ -1,62 +1,74 @@
-# Chaine Youtube : https://www.youtube.com/@Loic-Cybersecurite
-# 🦾 Roomba WiFi Control avec ESP32 & Interface Web Joystick
+# Control a Roomba over WiFi with an ESP32 and a Web Interface
 
-## 🚀 Présentation
+This guide explains how to take control of your Roomba vacuum (500/600/700 series) using an ESP32 board, all driven by a web interface accessible from your phone, tablet, or computer.
 
-Ce projet permet de **contrôler un aspirateur Roomba (série 500/600/700...) via le WiFi avec un ESP32** et une **interface web joystick** (PC, tablette, smartphone).
-
-**Fonctionnalités principales :**
-- Déplacement en temps réel (joystick virtuel)
-- Lecture du niveau de batterie
-- Affichage des capteurs (pare-chocs, falaise…)
-- Activation/désactivation des brosses
-- 100% open-source, facilement modifiable
+**Associated YouTube Channel:** [Loic Cybersecurite](https://www.youtube.com/@Loic-Cybersecurite)
 
 ---
 
-## 🛠️ Matériel nécessaire
+## 🚀 Project Features
 
-- **ESP32** (ex : DevKit v1)
-- **Roomba** compatible Open Interface (série 500/600/700...)
-- **Fils Dupont** (pour connexion série et GND)
-- **PC** pour programmer l’ESP32 (IDE Arduino recommandé)
-- **Réseau WiFi** 2.4 GHz
-
----
-
-## 📡 Schéma de câblage
-
-| ESP32 (par défaut) | Roomba          |  
-|--------------------|-----------------|  
-| TX (GPIO 17)       | RX Roomba       |  
-| RX (GPIO 16)       | TX Roomba       |  
-| GND                | GND Roomba      |  
-| –                  | Pin 7 → GND     |  
-
-> **Remarques :**
-> - **Pin 7 (“Device Detect”) du Roomba** doit être reliée à GND pour activer l’Open Interface.
-> - **N’alimentez pas l’ESP32 depuis le Roomba** : préférez l’USB.
+* **Real-time Control:** Drive your Roomba with a virtual joystick.
+* **Status Monitoring:** Check the battery level in real-time.
+* **Sensor Data:** View feedback from sensors (bumpers, cliffs, etc.).
+* **Brush Control:** Toggle the cleaning brushes on demand.
+* **Open-Source:** The project is fully open-source and easy to modify to fit your needs.
 
 ---
 
-## ⚡️ Installation
+## 🛠️ Required Hardware
 
-### 1. Préparer l’environnement
+To build this project, you will need the following components:
 
-- Installer l’[IDE Arduino](https://www.arduino.cc/en/software)
-- Ajouter le support ESP32 (Gestionnaire de cartes)
-- Installer les bibliothèques :
-  - [ESPAsyncWebServer](https://github.com/me-no-dev/ESPAsyncWebServer)
-  - [AsyncTCP](https://github.com/me-no-dev/AsyncTCP)
-  - [ArduinoJson](https://github.com/bblanchon/ArduinoJson)
+* An **ESP32** development board (e.g., a DevKit v1 model).
+* A **Roomba** compatible with the Open Interface (typically 500, 600, or 700 series).
+* A few **Dupont jumper wires** (male/female) for the connections.
+* A **computer** to program the ESP32 using the Arduino IDE.
+* A **2.4 GHz WiFi network**.
 
 ---
 
-### 2. Configuration & Téléversement
+## 📡 Wiring Diagram
 
-- Ouvrez le fichier `.ino` dans l’IDE Arduino.
-- **Modifiez vos identifiants WiFi** :
+The connection between the ESP32 and the Roomba's serial port is straightforward. Follow the table below:
+
+| ESP32 (Default Pins) | Roomba (Mini-DIN Port) |
+| :------------------- | :--------------------- |
+| **GND** | GND                    |
+| **TX (GPIO 17)** | Roomba RX              |
+| **RX (GPIO 16)** | Roomba TX              |
+| *Not Connected* | Pin 7 ("Device Detect") → **GND** |
+
+> **⚠️ Important Notes:**
+>
+> 1.  To enable the Roomba's "Open Interface" mode, its **Pin 7 ("Device Detect") must be connected to ground (GND)**.
+> 2.  Do not attempt to power the ESP32 from the Roomba. Use a stable, external power source like your computer's **USB port** or a wall adapter.
+
+---
+
+## ⚡️ Software Setup Guide
+
+### 1. Preparing the Development Environment
+
+1.  **Install the Arduino IDE:** If you haven't already, download and install the software from the [official Arduino website](https://www.arduino.cc/en/software).
+2.  **Add ESP32 Board Support:** In the IDE, go to `File > Preferences` and add the following URL to the "Additional Boards Manager URLs" field: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`. Then, install `esp32` from `Tools > Board > Boards Manager`.
+3.  **Install the Required Libraries:** Using the Library Manager (`Sketch > Include Library > Manage Libraries...`), search for and install the following:
+    * `ESPAsyncWebServer`
+    * `AsyncTCP`
+    * `ArduinoJson`
+
+### 2. Configuration and Uploading
+
+1.  Open the project file (`.ino`) in your Arduino IDE.
+2.  Find and modify the following lines to enter your WiFi credentials:
 
 ```cpp
-const char* ssid = "TON_WIFI";
-const char* password = "TON_MDP_WIFI";
+// --- Edit your WiFi credentials here ---
+const char* ssid = "YOUR_WIFI_SSID";
+const char* password = "YOUR_WIFI_PASSWORD";
+```
+
+3.  Connect your ESP32 to your computer, select the correct COM port and board type (e.g., `DOIT ESP32 DEVKIT V1`) from the `Tools` menu.
+4.  Click the **Upload** button to compile and flash the program onto the ESP32.
+
+Once the upload is complete, the ESP32 will connect to your WiFi. You can then access the control interface via the IP address displayed in the Serial Monitor.
