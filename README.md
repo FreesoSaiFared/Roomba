@@ -1,3 +1,17 @@
+Translated from the French source (video in French). 
+
+This [Reddit thread](https://www.reddit.com/r/esp32/comments/1lfj48y/i_modified_my_roomba_using_an_esp32/) reported on it. There was an [attempt](https://github.com/Wummeke/Roomba-ESP8266-MQTT) years ago,  but that stranded on not being able to wake up from the docking state. This is apparently not a problem according to this new implementation: 
+
+##### Have you find a solution to the wake from dock issue? I played with this years ago, but back then no one was able to wake the Roomba reliable, when it is docked. See [this repo on GitHub ](https://github.com/Wummeke/Roomba-ESP8266-MQTT) ⏤ by *wummeke* (↑ 2/ ↓ 0)
+├─ I had this issue once. I had to remove the battery for about 20 seconds, and it never happened again. ⏤ by *TallReflection1263* (↑ 2/ ↓ 0)
+└────
+
+# Possible caveat for the newer models (might not work)
+##### I wonder if this works with the new more basic models. Probably they don't have that dev port anymore. ⏤ by *Alienhaslanded* (↑ 1/ ↓ 0)
+├─ I don’t think so :/ ⏤ by *TallReflection1263* (↑ 1/ ↓ 0)
+└────
+
+
 # Control a Roomba over WiFi with an ESP32 and a Web Interface
 
 This guide explains how to take control of your Roomba vacuum (500/600/700 series) using an ESP32 board, all driven by a web interface accessible from your phone, tablet, or computer.
@@ -72,3 +86,42 @@ const char* password = "YOUR_WIFI_PASSWORD";
 4.  Click the **Upload** button to compile and flash the program onto the ESP32.
 
 Once the upload is complete, the ESP32 will connect to your WiFi. You can then access the control interface via the IP address displayed in the Serial Monitor.
+
+
+
+
+# Roomba-ESP8266-MQTT
+
+From: https://github.com/Wummeke/Roomba-ESP8266-MQTT
+
+Code, hints, tips, tricks and general documentation used as basis and lots of inspiration (in non particular order):
+* https://github.com/thehookup/MQTT-Roomba-ESP01
+* https://github.com/Mjrovai/Roomba_BT_Ctrl
+* https://github.com/johnboiles/esp-roomba-mqtt
+* https://www.bakke.online/index.php/2017/06/02/self-updating-ota-firmware-for-esp8266/
+* https://forum.mysensors.org/post/52800
+* http://anrg.usc.edu/ee579/spring2016/Roomba/iRobot_Roomba_600_Open_Interface_Spec.pdf
+
+Uses Roomba library by Mike Macauley:
+* http://www.airspayce.com/mikem/arduino/Roomba
+
+# wiring:
+
+```
+Roomba  ESP
+-----------
+RX      TX
+VCC     VCC
+GND     GND
+BRC     GPIO0
+TX      RX
+```
+Note, I amplified  the TX signal from the Roomba with PNP transistor. See documentation in the Roomba library mentioned above and/or wiring scheme in the Hook Up's repository. This is different from John Boiles solution, who uses a voltage devider to lower the voltage of the TX signal. Not sure which approach is better, but using the transistor works fine for me.
+
+# known issue:
+My Roomba 650 won't wake up from sleep when docked. Tried pulsing BRC-pin low every 28 secs, but  Roomba resets itself after an hour or so. After that it won't wakeup unless I press the Clean button. However, it still responds with status information every so much minutes. 
+
+If anyone has a sollution to this issue... Please let me know!
+
+
+
